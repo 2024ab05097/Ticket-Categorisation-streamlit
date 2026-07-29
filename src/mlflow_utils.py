@@ -66,5 +66,4 @@ class TrackingRun:
 
     def log_sklearn_model(self, model, artifact_path: str, registered_model_name=None):
         if self.enabled:
-            import mlflow.sklearn
-            mlflow.sklearn.log_model(model, artifact_path, registered_model_name=registered_model_name)
+            
