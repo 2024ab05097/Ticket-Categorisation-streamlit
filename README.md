@@ -17,6 +17,12 @@ feedback loop, API) stays the same.
 ## Quick start
 
 ```bash
+Installation:
+pip install -r requirements.txt
+
+Run:
+streamlit run streamlit_app.py
+
 pip install -r requirements.txt          # or just pandas/numpy/scikit-learn/joblib for the core pipeline
 
 # One command, whole diagram end-to-end (recommended -- see below):
