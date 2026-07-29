@@ -38,8 +38,11 @@ from src.orchestrator import TicketTriageOrchestrator
 from src.feedback_loop import FeedbackStore, FeedbackRecord, select_for_active_learning
 from src.llm_fallback import get_llm_fallback
 import src.confidence_engine as confidence_engine
-from src import train as train_module
-
+try:
+    from src import train as train_module
+except Exception:
+    train_module = None
+    
 ARTIFACT_DIR = "artifacts"
 FEEDBACK_PATH = f"{ARTIFACT_DIR}/feedback_log.jsonl"
 
@@ -96,11 +99,18 @@ def get_feedback_store():
 
 
 def run_training(model_type: str, n_train: int):
+    if train_module is None:
+        st.error("Training module unavailable in Streamlit deployment.")
+        return
+
     data_csv = "data/synthetic_tickets.csv"
     if os.path.exists(data_csv):
         os.remove(data_csv)
-    train_module.main(embedding_backend="tfidf", model_type=model_type)
 
+    train_module.main(
+        embedding_backend="tfidf",
+        model_type=model_type
+    )
 
 # --------------------------------------------------------------------------
 # Session state
