@@ -21,8 +21,8 @@ import os
 MLFLOW_AVAILABLE = True
 try:
     import mlflow
-except ImportError:
-    MLFLOW_AVAILABLE = False
+
+mlflow.set_tracking_uri("sqlite:///mlflow.db")
 
 
 def get_tracking_uri():
