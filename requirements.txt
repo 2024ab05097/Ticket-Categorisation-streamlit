@@ -14,7 +14,7 @@ sentence-transformers>=2.6
 torch>=2.1
 
 # --- Phase 5 upgrade: full SHAP/LIME explainability (explainability.py) ---
-shap>=0.48
+
 lime>=0.2.0.1
 
 # --- Optional Stage-1/Stage-2 model ablation ---
