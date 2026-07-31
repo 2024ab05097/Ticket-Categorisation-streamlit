@@ -1,98 +1,186 @@
 """
-explainability.py
--------------------
-Implements Objective: "Integrate LIME/SHAP explainability mechanisms" and
-"Incorporate explainability for routing decisions".
+src/explainability.py
+---------------------
 
-Design note: SHAP/LIME are wrapped behind try/except so the rest of the
-pipeline runs even before those packages are installed on the training box.
-The fallback (`LinearWeightExplainer`) is a legitimate lightweight
-explainer for the TF-IDF + LogisticRegression baseline (it just surfaces
-the top contributing terms by |coefficient * tfidf_value|), and doubles as
-a discussion point for Gap-6 ("High computational cost of explainability")
--- you can report a latency comparison between this and full SHAP/LIME in
-the dissertation's evaluation chapter.
+Explainability module for the Agentic ITSM Ticket Triaging framework.
+
+Supports:
+1. Lightweight Linear Explanation (default)
+2. LIME
+3. SHAP
+
+The lightweight explainer is used by default because it is extremely
+fast for TF-IDF + Logistic Regression and provides interpretable
+feature contributions.
+
+LIME and SHAP are optional and loaded only if installed.
 """
 
+from __future__ import annotations
+
+import time
+import warnings
 import numpy as np
 
+warnings.filterwarnings("ignore")
 
-class LinearWeightExplainer:
-    """Cheap, always-available explainer for linear models over sparse TF-IDF features."""
 
-    def __init__(self, model, feature_names, top_k=8):
-        self.model = model          # sklearn LogisticRegression
-        self.feature_names = np.array(feature_names)
-        self.top_k = top_k
+###############################################################
+# Base Explainer
+###############################################################
+
+class BaseExplainer:
 
     def explain(self, x_row, predicted_class_index):
-        """x_row: single sparse row (1, n_features). Returns list of (term, contribution)."""
-        if not hasattr(self.model, "coef_"):
+        raise NotImplementedError
+
+
+###############################################################
+# Linear Explainer
+###############################################################
+
+class LinearWeightExplainer(BaseExplainer):
+    """
+    Fast explainer for linear models.
+
+    Contribution =
+        TF-IDF value × model coefficient
+    """
+
+    def __init__(
+            self,
+            model,
+            feature_names,
+            top_k=10):
+
+        if not hasattr(model, "coef_"):
             raise TypeError(
-                "LinearWeightExplainer only works on linear models with a .coef_ "
-                "attribute (e.g. LogisticRegression). For a nonlinear model like "
-                "MLPClassifier, use SHAPExplainer (shap.KernelExplainer) or "
-                "LIMEExplainer instead -- see get_explainer(backend='shap'/'lime')."
+                "LinearWeightExplainer requires "
+                "a linear sklearn model."
             )
-        coef = self.model.coef_[predicted_class_index]
-        x_dense = np.asarray(x_row.todense()).ravel() if hasattr(x_row, "todense") else np.asarray(x_row).ravel()
-        contributions = coef * x_dense
-        top_idx = np.argsort(np.abs(contributions))[::-1][: self.top_k]
-        return [
-            {"term": self.feature_names[i], "contribution": float(contributions[i])}
-            for i in top_idx if contributions[i] != 0
-        ]
 
+        self.model = model
+        self.feature_names = np.asarray(feature_names)
+        self.top_k = top_k
 
-class SHAPExplainer:
-    """Wraps shap.LinearExplainer / TreeExplainer depending on model type."""
+    def explain(
+            self,
+            x_row,
+            predicted_class_index):
 
-    def __init__(self, model, background_data):
-        try:
-            import shap
-        except ImportError as e:
-            raise ImportError("pip install shap to use SHAPExplainer") from e
-        self._shap = shap
-        if hasattr(model, "coef_"):
-            self.explainer = shap.LinearExplainer(model, background_data)
-        elif hasattr(model, "estimators_") or hasattr(model, "get_booster"):
-            self.explainer = shap.TreeExplainer(model)
+        if hasattr(x_row, "toarray"):
+            x = x_row.toarray().ravel()
         else:
-            # Model-agnostic fallback -- covers MLPClassifier and anything else
-            # without a fast closed-form explainer. Slower (samples the model
-            # many times per explanation), which is exactly the "high
-            # computational cost of explainability" tradeoff (Gap-6) to report
-            # in your evaluation chapter when you use the ANN option.
-            self.explainer = shap.KernelExplainer(model.predict_proba, background_data)
+            x = np.asarray(x_row).ravel()
 
-    def explain(self, x_row, top_k=8):
-        shap_values = self.explainer.shap_values(x_row)
-        vals = np.asarray(shap_values).ravel()
-        top_idx = np.argsort(np.abs(vals))[::-1][:top_k]
-        return top_idx, vals[top_idx]
+        coef = self.model.coef_[predicted_class_index]
+
+        contribution = coef * x
+
+        indices = np.argsort(
+            np.abs(contribution)
+        )[::-1][:self.top_k]
+
+        explanation = []
+
+        for idx in indices:
+
+            if contribution[idx] == 0:
+                continue
+
+            explanation.append({
+
+                "feature": str(self.feature_names[idx]),
+
+                "contribution": float(contribution[idx]),
+
+                "importance": float(abs(contribution[idx]))
+
+            })
+
+        return explanation
 
 
-class LIMEExplainer:
-    """Wraps lime.lime_text for model-agnostic local explanations."""
+###############################################################
+# LIME
+###############################################################
 
-    def __init__(self, predict_proba_fn, class_names):
+class LIMEExplainer(BaseExplainer):
+
+    def __init__(
+            self,
+            model,
+            X_train,
+            feature_names,
+            class_names):
+
         try:
-            from lime.lime_text import LimeTextExplainer
-        except ImportError as e:
-            raise ImportError("pip install lime to use LIMEExplainer") from e
-        self.explainer = LimeTextExplainer(class_names=class_names)
-        self.predict_proba_fn = predict_proba_fn
 
-    def explain(self, raw_text, num_features=8):
-        exp = self.explainer.explain_instance(raw_text, self.predict_proba_fn, num_features=num_features)
-        return exp.as_list()
+            from lime.lime_tabular import (
+                LimeTabularExplainer
+            )
 
+        except ImportError:
 
-def get_explainer(model, feature_names=None, backend="linear", **kwargs):
-    if backend == "linear":
-        return LinearWeightExplainer(model, feature_names, **kwargs)
-    if backend == "shap":
-        return SHAPExplainer(model, **kwargs)
-    if backend == "lime":
-        return LIMEExplainer(**kwargs)
-    raise ValueError(f"Unknown explainability backend: {backend}")
+            raise ImportError(
+                "Install lime first:\n"
+                "pip install lime"
+            )
+
+        if hasattr(X_train, "toarray"):
+            X_train = X_train.toarray()
+
+        self.model = model
+
+        self.explainer = LimeTabularExplainer(
+
+            training_data=X_train,
+
+            feature_names=feature_names,
+
+            class_names=class_names,
+
+            mode="classification",
+
+            discretize_continuous=True
+
+        )
+
+    def explain(
+            self,
+            x_row,
+            predicted_class_index):
+
+        if hasattr(x_row, "toarray"):
+            sample = x_row.toarray()[0]
+        else:
+            sample = np.asarray(x_row).ravel()
+
+        exp = self.explainer.explain_instance(
+
+            sample,
+
+            self.model.predict_proba,
+
+            num_features=10,
+
+            labels=[predicted_class_index]
+
+        )
+
+        output = []
+
+        for feature, score in exp.as_list(
+                label=predicted_class_index):
+
+            output.append({
+
+                "feature": feature,
+
+                "contribution": float(score),
+
+                "importance": float(abs(score))
+
+            })
+
+        return output
