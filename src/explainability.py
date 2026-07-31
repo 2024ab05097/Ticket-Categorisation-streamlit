@@ -184,3 +184,186 @@ class LIMEExplainer(BaseExplainer):
             })
 
         return output
+
+
+###############################################################
+# SHAP Explainer
+###############################################################
+
+    ###############################################################
+# SHAP Explainer
+###############################################################
+
+class SHAPExplainer(BaseExplainer):
+
+    def __init__(
+            self,
+            model,
+            X_train):
+
+        try:
+            import shap
+        except ImportError:
+            raise ImportError(
+                "Install SHAP first:\n"
+                "pip install shap"
+            )
+
+        self.model = model
+        self.shap = shap
+
+        if hasattr(X_train, "toarray"):
+            X_train = X_train.toarray()
+
+        # Use a small background sample for speed
+        background = X_train[:100]
+
+        self.explainer = shap.Explainer(
+            self.model.predict_proba,
+            background
+        )
+
+    def explain(
+            self,
+            x_row,
+            predicted_class_index):
+
+        if hasattr(x_row, "toarray"):
+            sample = x_row.toarray()
+        else:
+            sample = np.asarray(x_row).reshape(1, -1)
+
+        values = self.explainer(sample)
+
+        shap_values = values.values[0][:, predicted_class_index]
+
+        explanation = []
+
+        for i, score in enumerate(shap_values):
+
+            if abs(score) < 1e-6:
+                continue
+
+            explanation.append({
+
+                "feature": str(values.feature_names[i])
+                if values.feature_names
+                else f"feature_{i}",
+
+                "contribution": float(score),
+
+                "importance": float(abs(score))
+
+            })
+
+        explanation.sort(
+            key=lambda x: x["importance"],
+            reverse=True
+        )
+
+        return explanation[:10]
+
+
+###############################################################
+# Factory
+###############################################################
+
+def get_explainer(
+        backend,
+        model,
+        feature_names,
+        X_train=None,
+        class_names=None,
+        top_k=10):
+
+    backend = backend.lower()
+
+    if backend == "linear":
+
+        return LinearWeightExplainer(
+            model=model,
+            feature_names=feature_names,
+            top_k=top_k
+        )
+
+    elif backend == "lime":
+
+        if X_train is None:
+            raise ValueError(
+                "X_train required for LIME"
+            )
+
+        return LIMEExplainer(
+            model=model,
+            X_train=X_train,
+            feature_names=feature_names,
+            class_names=class_names
+        )
+
+    elif backend == "shap":
+
+        if X_train is None:
+            raise ValueError(
+                "X_train required for SHAP"
+            )
+
+        return SHAPExplainer(
+            model=model,
+            X_train=X_train
+        )
+
+    else:
+
+        raise ValueError(
+            f"Unknown backend: {backend}"
+        )
+
+
+###############################################################
+# Benchmark Utility
+###############################################################
+
+def benchmark_explainability(
+        explainer,
+        x_row,
+        predicted_class_index):
+
+    start = time.perf_counter()
+
+    explanation = explainer.explain(
+        x_row,
+        predicted_class_index
+    )
+
+    end = time.perf_counter()
+
+    return {
+
+        "backend": explainer.__class__.__name__,
+
+        "latency_ms": round(
+            (end - start) * 1000,
+            2
+        ),
+
+        "num_features": len(explanation),
+
+        "explanation": explanation
+
+    }
+
+
+###############################################################
+# Convenience wrapper
+###############################################################
+
+def explain_prediction(
+        explainer,
+        x_row,
+        predicted_class_index):
+
+    return benchmark_explainability(
+        explainer,
+        x_row,
+        predicted_class_index
+        )
