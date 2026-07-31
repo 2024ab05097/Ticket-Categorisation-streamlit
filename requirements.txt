@@ -25,3 +25,45 @@ mlflow>=2.12
 
 # --- Testing ---
 pytest>=8.0
+
+# Core ML
+numpy>=1.26
+pandas>=2.2
+scikit-learn>=1.5
+scipy>=1.13
+joblib>=1.4
+
+# NLP
+nltk>=3.9
+spacy>=3.8
+sentence-transformers>=3.0
+transformers>=4.45
+torch>=2.4
+
+# Explainability
+lime>=0.2
+shap>=0.46
+
+# API
+fastapi>=0.115
+uvicorn>=0.30
+pydantic>=2.9
+
+# UI
+streamlit>=1.38
+plotly>=5.24
+
+# Experiment Tracking
+mlflow>=2.16
+
+# Dataset balancing
+imbalanced-learn>=0.12
+
+# Utilities
+tqdm>=4.66
+requests>=2.32
+python-dotenv>=1.0
+pyyaml>=6.0
+
+# Optional
+xgboost>=2.1
